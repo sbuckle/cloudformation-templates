@@ -1,0 +1,72 @@
+Resources:
+  TransformExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [lambda.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+  TransformFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          
+          def handler(event, context):
+            fragment = event["fragment"]
+            
+            # Create the IPv6 CIDR block
+            fragment['Resources']['Ipv6CidrBlock'] = {}
+            fragment['Resources']['Ipv6CidrBlock']['Type'] = 'AWS::EC2::VPCCidrBlock'
+            fragment['Resources']['Ipv6CidrBlock']['Properties'] = {}
+            fragment['Resources']['Ipv6CidrBlock']['Properties']['AmazonProvidedIpv6CidrBlock'] = True
+            fragment['Resources']['Ipv6CidrBlock']['Properties']['VpcId'] = {}
+            fragment['Resources']['Ipv6CidrBlock']['Properties']['VpcId']['Ref'] = 'Vpc'
+
+            # Create the public route
+            fragment['Resources']['Ipv6Route'] = {}
+            fragment['Resources']['Ipv6Route']['Type'] = 'AWS::EC2::Route'
+            fragment['Resources']['Ipv6Route']['DependsOn'] = 'InternetGateway'
+            fragment['Resources']['Ipv6Route']['Properties'] = {}
+            fragment['Resources']['Ipv6Route']['Properties']['DestinationIpv6CidrBlock'] = '::/0'
+            fragment['Resources']['Ipv6Route']['Properties']['RouteTableId'] = {}
+            fragment['Resources']['Ipv6Route']['Properties']['RouteTableId']['Ref'] = 'PublicRouteTable'
+            fragment['Resources']['Ipv6Route']['Properties']['GatewayId'] = {}
+            fragment['Resources']['Ipv6Route']['Properties']['GatewayId']['Ref'] = 'InternetGateway'
+
+            # Update the subnet to assign IPv6 addresses automatically
+            fragment['Resources']['PublicSubnet']['DependsOn'] = 'Ipv6CidrBlock'
+            fragment['Resources']['PublicSubnet']['Properties']['AssignIpv6AddressOnCreation'] = True
+            fragment['Resources']['PublicSubnet']['Properties']['Ipv6CidrBlock'] = {}
+            cidr = {}
+            cidr['Fn::Cidr'] = [{"Fn::Select": [0, {"Fn::GetAtt": ["Vpc", "Ipv6CidrBlocks"]} ]}, 1, 64]
+            fragment['Resources']['PublicSubnet']['Properties']['Ipv6CidrBlock']['Fn::Select'] = [0, cidr]
+
+            r = {}
+            r['requestId'] = event['requestId']
+            r['status'] = 'SUCCESS'
+            r['fragment'] = fragment
+
+            return r
+      
+      Handler: index.handler
+      Runtime: python3.6
+      Role: !GetAtt TransformExecutionRole.Arn
+  TransformFunctionPermissions:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt TransformFunction.Arn
+      Principal: 'cloudformation.amazonaws.com'
+  Transform:
+    Type: AWS::CloudFormation::Macro
+    Properties:
+      Name: EnableIPv6
+      Description: 'Enable IPv6 addresses'
+      FunctionName: !GetAtt TransformFunction.Arn
