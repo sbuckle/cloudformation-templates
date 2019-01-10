@@ -43,6 +43,8 @@ Resources:
             # Update the subnet to assign IPv6 addresses automatically
             fragment['Resources']['PublicSubnet']['DependsOn'] = 'Ipv6CidrBlock'
             fragment['Resources']['PublicSubnet']['Properties']['AssignIpv6AddressOnCreation'] = True
+            if 'MapPublicIpOnLaunch' in fragment['Resources']['PublicSubnet']['Properties']:
+              del fragment['Resources']['PublicSubnet']['Properties']['MapPublicIpOnLaunch']
             fragment['Resources']['PublicSubnet']['Properties']['Ipv6CidrBlock'] = {}
             cidr = {}
             cidr['Fn::Cidr'] = [{"Fn::Select": [0, {"Fn::GetAtt": ["Vpc", "Ipv6CidrBlocks"]} ]}, 1, 64]
