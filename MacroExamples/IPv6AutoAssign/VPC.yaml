@@ -42,6 +42,5 @@ Resources:
     Properties:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
-
 Transform:
   - EnableIPv6
