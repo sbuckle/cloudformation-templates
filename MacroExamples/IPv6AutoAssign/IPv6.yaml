@@ -66,6 +66,7 @@ Resources:
       Action: 'lambda:InvokeFunction'
       FunctionName: !GetAtt TransformFunction.Arn
       Principal: 'cloudformation.amazonaws.com'
+      SourceAccount: !Ref 'AWS::AccountId'
   Transform:
     Type: AWS::CloudFormation::Macro
     Properties:
