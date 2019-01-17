@@ -1,0 +1,98 @@
+Parameters:
+  BucketName:
+    Type: String
+  Key:
+    Type: String
+Resources:
+  TransformExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [lambda.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+  ReadOnlyPolicy:
+    Type: AWS::IAM::Policy
+    DependsOn: TransformExecutionRole
+    Properties:
+      PolicyName: "ReadOnlyPolicy"
+      Roles: 
+        - !Ref TransformExecutionRole
+      PolicyDocument: !Sub |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": "s3:GetObject",
+              "Resource": "arn:aws:s3:::${BucketName}/*"
+            }
+          ]
+        }
+  TransformFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: LookupAMI
+      Code:
+        ZipFile: |
+
+          import boto3
+          import gzip
+          import json
+          import os
+
+          BUCKET_NAME = os.environ['BUCKET_NAME']
+          KEY = os.environ['KEY']
+
+          s3 = boto3.client('s3')
+          
+          def get_ami(region, distro):
+            obj = s3.get_object(Bucket=BUCKET_NAME, Key=KEY)
+            data = json.loads(
+              gzip.decompress(
+                obj['Body'].read()
+              )
+            )
+            return data[distro][region] if distro in data else None
+          
+          def handler(event, context):
+            r = {}
+            r['requestId'] = event['requestId']
+            r['status'] = 'success'
+
+            name = event['params']['Name']
+            region = event['region']
+            ami = get_ami(region, name)
+            if ami:
+              r['fragment'] = ami
+            else:
+              r['status'] = 'failure'
+              r['errorMessage'] = 'Failed to find AMI'
+            return r
+      
+      Handler: index.handler
+      Runtime: python3.6
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref BucketName
+          KEY: !Ref Key
+      Role: !GetAtt TransformExecutionRole.Arn
+  TransformFunctionPermissions:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt TransformFunction.Arn
+      Principal: 'cloudformation.amazonaws.com'
+      SourceAccount: !Ref 'AWS::AccountId'
+  Transform:
+    Type: AWS::CloudFormation::Macro
+    Properties:
+      Name: LookupAMI
+      Description: 'Find an AMI ID based on the region'
+      FunctionName: !GetAtt TransformFunction.Arn
